@@ -1,0 +1,13 @@
+[Unit]
+Description=NatProxy Client Service
+After=network.target
+
+[Service]
+Type=simple
+User=nobody
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/local/bin/natproxy -local='127.0.0.1:80' -server='127.0.0.1:10020' -token='balalaxiaomoxian'
+
+[Install]
+WantedBy=multi-user.target

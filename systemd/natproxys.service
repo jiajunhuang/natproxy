@@ -1,0 +1,13 @@
+[Unit]
+Description=NatProxy Server Service
+After=network.target
+
+[Service]
+Type=simple
+User=nobody
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/local/bin/natproxys
+
+[Install]
+WantedBy=multi-user.target
