@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strings"
+	"sync"
 
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
+	"github.com/jiajunhuang/natproxy/pool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -19,6 +22,7 @@ var (
 	wanip     = ""
 )
 
+// Start gRPC server
 func Start(addr, wanIP string) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -38,8 +42,9 @@ func Start(addr, wanIP string) {
 
 type service struct {
 	wanIP        string
-	wanConnCh    chan net.Conn // connections from WAN
-	clientConnCh chan net.Conn // connections from client
+	wanConnCh    chan net.Conn   // connections from WAN
+	clientConnCh chan net.Conn   // connections from client
+	msgTypeCh    chan pb.MsgType // messages send to client
 }
 
 func newService(wanIP string) *service {
@@ -58,6 +63,8 @@ func (s *service) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginRes
 
 func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	defer close(s.wanConnCh)
+	defer close(s.clientConnCh)
+	defer close(s.msgTypeCh)
 
 	ctx := stream.Context()
 
@@ -71,8 +78,13 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 		return err
 	}
 	defer wanListener.Close()
-	// TODO 下发消息给客户端告知公网地址
-	_ = wanListenerAddr
+	// 下发消息给客户端告知公网地址
+	msg := pb.MsgResponse{Type: pb.MsgType_WANAddr, Data: []byte(wanListenerAddr)}
+	if err := stream.Send(&msg); err != nil {
+		logger.Error("failed to send WAN listener address to client", zap.Any("msg", msg), zap.Error(err))
+		return err
+	}
+	logger.Info("successfully send WAN listener address to client", zap.Any("msg", msg))
 	go func() {
 		for {
 			conn, err := wanListener.Accept()
@@ -91,8 +103,13 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 		return err
 	}
 	defer clientListener.Close()
-	// TODO 下发消息给客户端告知客户端应该连接的公网地址
-	_ = clientListenerAddr
+	// 下发消息给客户端告知客户端应该连接的公网地址
+	msg = pb.MsgResponse{Type: pb.MsgType_ClientConnAddr, Data: []byte(clientListenerAddr)}
+	if err := stream.Send(&msg); err != nil {
+		logger.Error("failed to send client listener address to client", zap.Any("msg", msg), zap.Error(err))
+		return err
+	}
+	logger.Info("successfully send client listener address to client", zap.Any("msg", msg))
 	go func() {
 		for {
 			conn, err := clientListener.Accept()
@@ -105,14 +122,30 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 		logger.Info("listener for client closing...")
 	}()
 
+	go func() {
+		for {
+			conn, ok := <-s.wanConnCh
+			if !ok {
+				logger.Error("connection channel closed")
+				return
+			}
+
+			go s.handleWANRequest(conn)
+		}
+	}()
+
 	for {
-		conn, ok := <-s.wanConnCh
+		msgType, ok := <-s.msgTypeCh
 		if !ok {
-			logger.Error("connection channel closed")
-			return errors.ErrConnectionChClosed
+			logger.Error("message channel closed")
+			return errors.ErrMsgTypeChanClosed
 		}
 
-		go s.handleWANRequest(conn)
+		msg := pb.MsgResponse{Type: msgType}
+		if err := stream.Send(&msg); err != nil {
+			logger.Error("failed to send message", zap.Any("msg", msg), zap.Error(err))
+		}
+		logger.Info("successfully send message to client", zap.Any("msg", msg))
 	}
 }
 
@@ -161,8 +194,31 @@ func (s *service) createListener(addr string) (net.Listener, string, error) {
 
 func (s *service) handleWANRequest(wanConn net.Conn) {
 	// 下发消息给客户端要求建立新的connection
+	s.msgTypeCh <- pb.MsgType_Connect
 
 	// 等待新的connection
+	clientConn := <-s.clientConnCh
 
 	// 把两个connection串起来
+	join(wanConn, clientConn)
+}
+
+// join two io.ReadWriteCloser and do some operations.
+func join(c1 io.ReadWriteCloser, c2 io.ReadWriteCloser) (inCount int64, outCount int64) {
+	var wait sync.WaitGroup
+	pipe := func(to io.ReadWriteCloser, from io.ReadWriteCloser, count *int64) {
+		defer to.Close()
+		defer from.Close()
+		defer wait.Done()
+
+		buf := pool.GetBuf(16 * 1024)
+		defer pool.PutBuf(buf)
+		*count, _ = io.CopyBuffer(to, from, buf)
+	}
+
+	wait.Add(2)
+	go pipe(c1, c2, &inCount)
+	go pipe(c2, c1, &outCount)
+	wait.Wait()
+	return
 }
