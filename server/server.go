@@ -56,11 +56,12 @@ func (s *service) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginRes
 func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
+		logger.Error("bad metadata", zap.Any("metadata", md))
 		return errors.ErrBadMetadata
 	}
-	logger.Info("metadata", zap.Any("metadata", md))
 	token := md.Get("natrp-token")
 	if len(token) != 1 {
+		logger.Error("bad token in metadata", zap.Any("token", token))
 		return errors.ErrBadMetadata
 	}
 
