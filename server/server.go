@@ -47,7 +47,10 @@ type service struct {
 
 func newService(wanIP string) *service {
 	return &service{
-		wanIP: wanIP,
+		wanIP:        wanIP,
+		wanConnCh:    make(chan net.Conn, 16),
+		clientConnCh: make(chan net.Conn, 16),
+		msgTypeCh:    make(chan pb.MsgType, 16),
 	}
 }
 
@@ -68,6 +71,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 
 	remote, ok := peer.FromContext(ctx)
 	logger.Info("client connected", zap.Any("remote", remote), zap.Bool("ok", ok))
+	defer logger.Info("client connection closed", zap.Any("remote", remote), zap.Bool("ok", ok))
 
 	// get listener for current user
 	wanListener, wanListenerAddr, err := s.getWANListen(ctx)
@@ -84,6 +88,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	}
 	logger.Info("successfully send WAN listener address to client", zap.Any("msg", msg))
 	go func() {
+		logger.Info("start to wait new connections from WAN...")
 		for {
 			conn, err := wanListener.Accept()
 			if err != nil {
@@ -109,6 +114,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	}
 	logger.Info("successfully send client listener address to client", zap.Any("msg", msg))
 	go func() {
+		logger.Info("start to wait new connections from client...")
 		for {
 			conn, err := clientListener.Accept()
 			if err != nil {
@@ -117,14 +123,14 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 			}
 			s.clientConnCh <- conn
 		}
-		logger.Info("listener for client closing...")
+		logger.Info("closing listener for client...")
 	}()
 
 	go func() {
 		for {
 			conn, ok := <-s.wanConnCh
 			if !ok {
-				logger.Error("connection channel closed")
+				logger.Error("WAN connection channel closed")
 				return
 			}
 
