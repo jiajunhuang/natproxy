@@ -26,14 +26,12 @@ func connectServer(addr string) {
 		logger.Error("failed to dial with server", zap.String("addr", addr), zap.Error(err))
 		return
 	}
-	defer conn.Close()
 
 	localConn, err := net.Dial("tcp", *localAddr)
 	if err != nil {
 		logger.Error("failed to dial with local address", zap.String("addr", *localAddr), zap.Error(err))
 		return
 	}
-	defer localConn.Close()
 
 	dial.Join(conn, localConn)
 }

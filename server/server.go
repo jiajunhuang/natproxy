@@ -202,6 +202,7 @@ func (manager *manager) handleConnFromWAN(clientListenerAddr string) {
 
 			// 等待新的connection
 			clientConn := <-manager.clientConnCh
+			defer logger.Info("connection between WAN & client disconnected", zap.Any("wanConn", wanConn.LocalAddr()), zap.Any("clientConn", clientConn.RemoteAddr()))
 
 			// 把两个connection串起来
 			dial.Join(wanConn, clientConn)

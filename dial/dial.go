@@ -46,6 +46,8 @@ func WithServer(ctx context.Context, addr string, tls bool) (pb.ServerServiceCli
 func Join(c1 io.ReadWriteCloser, c2 io.ReadWriteCloser) (inCount int64, outCount int64) {
 	var wait sync.WaitGroup
 	pipe := func(to io.ReadWriteCloser, from io.ReadWriteCloser, count *int64) {
+		defer c1.Close()
+		defer c2.Close()
 		defer wait.Done()
 
 		buf := pool.GetBuf(16 * 1024)
