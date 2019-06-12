@@ -17,7 +17,6 @@ import (
 
 var (
 	logger, _ = zap.NewProduction()
-	wanip     = ""
 )
 
 // Start gRPC server
@@ -39,7 +38,11 @@ func Start(addr, wanIP string) {
 }
 
 type service struct {
-	wanIP        string
+	wanIP string
+}
+
+type manager struct {
+	service      *service
 	wanConnCh    chan net.Conn        // connections from WAN
 	clientConnCh chan net.Conn        // connections from client
 	msgCh        chan *pb.MsgResponse // messages send to client
@@ -48,7 +51,13 @@ type service struct {
 
 func newService(wanIP string) *service {
 	return &service{
-		wanIP:        wanIP,
+		wanIP: wanIP,
+	}
+}
+
+func newManager(svc *service) *manager {
+	return &manager{
+		service:      svc,
 		wanConnCh:    make(chan net.Conn, 16),
 		clientConnCh: make(chan net.Conn, 16),
 		msgCh:        make(chan *pb.MsgResponse, 16),
@@ -65,7 +74,8 @@ func (s *service) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginRes
 }
 
 func (s *service) Msg(stream pb.ServerService_MsgServer) error {
-	defer close(s.msgCh)
+	manager := newManager(s)
+	defer close(manager.msgCh)
 
 	ctx := stream.Context()
 
@@ -81,8 +91,8 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 		return err
 	}
 	defer wanListener.Close()
-	go s.receiveConnFromWAN(client, wanListener)
-	s.msgCh <- &pb.MsgResponse{Type: pb.MsgType_WANAddr, Data: []byte(wanListenerAddr)}
+	go manager.receiveConnFromWAN(client, wanListener)
+	manager.msgCh <- &pb.MsgResponse{Type: pb.MsgType_WANAddr, Data: []byte(wanListenerAddr)}
 
 	// 启动客户端监听
 	clientListener, clientListenerAddr, err := s.createListener("0.0.0.0:0")
@@ -91,18 +101,18 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 		return err
 	}
 	defer clientListener.Close()
-	go s.receiveConnFromClient(client, clientListener)
+	go manager.receiveConnFromClient(client, clientListener)
 
 	// 处理来自公网请求
-	go s.handleConnFromWAN(clientListenerAddr)
+	go manager.handleConnFromWAN(clientListenerAddr)
 
 	// 接收来自客户端的gRPC请求
-	go s.receiveMsgFromClient(stream)
+	go manager.receiveMsgFromClient(stream)
 
 	// 启动客户端下发消息器
 	for {
 		select {
-		case msg, ok := <-s.msgCh:
+		case msg, ok := <-manager.msgCh:
 			if !ok {
 				logger.Error("message(to client) channel closed")
 				return errors.ErrMsgChanClosed
@@ -112,7 +122,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 				logger.Error("failed to send message", zap.Any("msg", msg), zap.Error(err))
 			}
 			logger.Info("successfully send message to client", zap.Any("msg", msg))
-		case msg, ok := <-s.clientMsgCh:
+		case msg, ok := <-manager.clientMsgCh:
 			if !ok {
 				return errors.ErrMsgChanClosed
 			}
@@ -165,8 +175,8 @@ func (s *service) createListener(addr string) (net.Listener, string, error) {
 }
 
 // 客户端消息接收器
-func (s *service) receiveMsgFromClient(stream pb.ServerService_MsgServer) {
-	defer close(s.clientMsgCh)
+func (manager *manager) receiveMsgFromClient(stream pb.ServerService_MsgServer) {
+	defer close(manager.clientMsgCh)
 
 	for {
 		req, err := stream.Recv()
@@ -174,24 +184,24 @@ func (s *service) receiveMsgFromClient(stream pb.ServerService_MsgServer) {
 			return
 		}
 
-		s.clientMsgCh <- req
+		manager.clientMsgCh <- req
 	}
 }
 
 // 公网请求处理器
-func (s *service) handleConnFromWAN(clientListenerAddr string) {
+func (manager *manager) handleConnFromWAN(clientListenerAddr string) {
 	for {
-		wanConn, ok := <-s.wanConnCh
+		wanConn, ok := <-manager.wanConnCh
 		if !ok {
 			return
 		}
 
 		go func() {
 			// 下发消息给客户端要求建立新的connection
-			s.msgCh <- &pb.MsgResponse{Type: pb.MsgType_Connect, Data: []byte(clientListenerAddr)}
+			manager.msgCh <- &pb.MsgResponse{Type: pb.MsgType_Connect, Data: []byte(clientListenerAddr)}
 
 			// 等待新的connection
-			clientConn := <-s.clientConnCh
+			clientConn := <-manager.clientConnCh
 
 			// 把两个connection串起来
 			dial.Join(wanConn, clientConn)
@@ -200,8 +210,8 @@ func (s *service) handleConnFromWAN(clientListenerAddr string) {
 }
 
 // 接收来自客户端的请求并且传递给channel
-func (s *service) receiveConnFromClient(client *peer.Peer, clientListener net.Listener) {
-	defer close(s.clientConnCh)
+func (manager *manager) receiveConnFromClient(client *peer.Peer, clientListener net.Listener) {
+	defer close(manager.clientConnCh)
 
 	logger.Info("start to wait new connections from client...")
 	for {
@@ -209,13 +219,13 @@ func (s *service) receiveConnFromClient(client *peer.Peer, clientListener net.Li
 		if err != nil {
 			return
 		}
-		s.clientConnCh <- conn
+		manager.clientConnCh <- conn
 	}
 }
 
 // 接收来自公网的请求并且传递给channel
-func (s *service) receiveConnFromWAN(client *peer.Peer, wanListener net.Listener) {
-	defer close(s.wanConnCh)
+func (manager *manager) receiveConnFromWAN(client *peer.Peer, wanListener net.Listener) {
+	defer close(manager.wanConnCh)
 
 	logger.Info("start to wait new connections from WAN...")
 	for {
@@ -223,6 +233,6 @@ func (s *service) receiveConnFromWAN(client *peer.Peer, wanListener net.Listener
 		if err != nil {
 			return
 		}
-		s.wanConnCh <- conn
+		manager.wanConnCh <- conn
 	}
 }
