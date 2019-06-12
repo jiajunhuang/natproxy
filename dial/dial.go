@@ -18,7 +18,14 @@ var (
 
 // WithServer dial with server
 func WithServer(ctx context.Context, addr string, tls bool) (pb.ServerServiceClient, *grpc.ClientConn, error) {
-	conn, err := grpc.Dial(addr, grpc.WithInsecure())
+	var conn *grpc.ClientConn
+	var err error
+	if tls {
+		conn, err = grpc.Dial(addr)
+	} else {
+		conn, err = grpc.Dial(addr, grpc.WithInsecure())
+	}
+
 	if err != nil {
 		logger.Error("failed to connect to server server", zap.Error(err))
 		return nil, nil, err
@@ -39,8 +46,6 @@ func WithServer(ctx context.Context, addr string, tls bool) (pb.ServerServiceCli
 func Join(c1 io.ReadWriteCloser, c2 io.ReadWriteCloser) (inCount int64, outCount int64) {
 	var wait sync.WaitGroup
 	pipe := func(to io.ReadWriteCloser, from io.ReadWriteCloser, count *int64) {
-		defer to.Close()
-		defer from.Close()
 		defer wait.Done()
 
 		buf := pool.GetBuf(16 * 1024)

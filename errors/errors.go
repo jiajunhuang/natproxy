@@ -15,8 +15,8 @@ var (
 	ErrBadRequest = errors.New("bad request")
 	// ErrBadMetadata bad metadata
 	ErrBadMetadata = errors.New("bad metadata")
-	// ErrConnectionClosed connection channel been closed
+	// ErrConnectionChClosed connection channel been closed
 	ErrConnectionChClosed = errors.New("connection channel already closed")
-	// ErrMsgTypeChanClosed message type channel been closed
-	ErrMsgTypeChanClosed = errors.New("message type channel already closed")
+	// ErrMsgChanClosed message type channel been closed
+	ErrMsgChanClosed = errors.New("message type channel already closed")
 )

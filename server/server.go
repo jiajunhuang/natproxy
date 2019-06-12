@@ -40,9 +40,10 @@ func Start(addr, wanIP string) {
 
 type service struct {
 	wanIP        string
-	wanConnCh    chan net.Conn   // connections from WAN
-	clientConnCh chan net.Conn   // connections from client
-	msgTypeCh    chan pb.MsgType // messages send to client
+	wanConnCh    chan net.Conn        // connections from WAN
+	clientConnCh chan net.Conn        // connections from client
+	msgCh        chan *pb.MsgResponse // messages send to client
+	clientMsgCh  chan *pb.MsgRequest  // messages from client
 }
 
 func newService(wanIP string) *service {
@@ -50,7 +51,8 @@ func newService(wanIP string) *service {
 		wanIP:        wanIP,
 		wanConnCh:    make(chan net.Conn, 16),
 		clientConnCh: make(chan net.Conn, 16),
-		msgTypeCh:    make(chan pb.MsgType, 16),
+		msgCh:        make(chan *pb.MsgResponse, 16),
+		clientMsgCh:  make(chan *pb.MsgRequest, 16),
 	}
 }
 
@@ -63,96 +65,69 @@ func (s *service) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginRes
 }
 
 func (s *service) Msg(stream pb.ServerService_MsgServer) error {
-	defer close(s.wanConnCh)
-	defer close(s.clientConnCh)
-	defer close(s.msgTypeCh)
+	defer close(s.msgCh)
 
 	ctx := stream.Context()
 
-	remote, ok := peer.FromContext(ctx)
-	logger.Info("client connected", zap.Any("remote", remote), zap.Bool("ok", ok))
-	defer logger.Info("client connection closed", zap.Any("remote", remote), zap.Bool("ok", ok))
+	// 获取客户端信息
+	client, ok := peer.FromContext(ctx)
+	logger.Info("client connected", zap.Any("client", client), zap.Bool("ok", ok))
+	defer logger.Info("client disconnected", zap.Any("client", client))
 
-	// get listener for current user
+	// 启动公网端口监听 && 下发消息给客户端告知公网地址
 	wanListener, wanListenerAddr, err := s.getWANListen(ctx)
 	if err != nil {
 		logger.Error("failed to create listener for WAN ", zap.Error(err))
 		return err
 	}
 	defer wanListener.Close()
-	// 下发消息给客户端告知公网地址
-	msg := pb.MsgResponse{Type: pb.MsgType_WANAddr, Data: []byte(wanListenerAddr)}
-	if err := stream.Send(&msg); err != nil {
-		logger.Error("failed to send WAN listener address to client", zap.Any("msg", msg), zap.Error(err))
-		return err
-	}
-	logger.Info("successfully send WAN listener address to client", zap.Any("msg", msg))
-	go func() {
-		logger.Info("start to wait new connections from WAN...")
-		for {
-			conn, err := wanListener.Accept()
-			if err != nil {
-				logger.Error("failed to accept new connection for WAN", zap.Any("remote", remote), zap.Error(err))
-				break
-			}
-			s.wanConnCh <- conn
-		}
-	}()
+	go s.receiveConnFromWAN(client, wanListener)
+	s.msgCh <- &pb.MsgResponse{Type: pb.MsgType_WANAddr, Data: []byte(wanListenerAddr)}
 
-	// create a listener for client
+	// 启动客户端监听
 	clientListener, clientListenerAddr, err := s.createListener("0.0.0.0:0")
 	if err != nil {
 		logger.Error("failed to create listener for client", zap.Error(err))
 		return err
 	}
 	defer clientListener.Close()
-	// 下发消息给客户端告知客户端应该连接的公网地址
-	msg = pb.MsgResponse{Type: pb.MsgType_ClientConnAddr, Data: []byte(clientListenerAddr)}
-	if err := stream.Send(&msg); err != nil {
-		logger.Error("failed to send client listener address to client", zap.Any("msg", msg), zap.Error(err))
-		return err
-	}
-	logger.Info("successfully send client listener address to client", zap.Any("msg", msg))
-	go func() {
-		logger.Info("start to wait new connections from client...")
-		for {
-			conn, err := clientListener.Accept()
-			if err != nil {
-				logger.Error("failed to accept new connection for client", zap.Any("remote", remote), zap.Error(err))
-				break
-			}
-			s.clientConnCh <- conn
-		}
-		logger.Info("closing listener for client...")
-	}()
+	go s.receiveConnFromClient(client, clientListener)
 
-	go func() {
-		for {
-			conn, ok := <-s.wanConnCh
-			if !ok {
-				logger.Error("WAN connection channel closed")
-				return
-			}
+	// 处理来自公网请求
+	go s.handleConnFromWAN(clientListenerAddr)
 
-			go s.handleWANRequest(conn)
-		}
-	}()
+	// 接收来自客户端的gRPC请求
+	go s.receiveMsgFromClient(stream)
 
+	// 启动客户端下发消息器
 	for {
-		msgType, ok := <-s.msgTypeCh
-		if !ok {
-			logger.Error("message channel closed")
-			return errors.ErrMsgTypeChanClosed
-		}
+		select {
+		case msg, ok := <-s.msgCh:
+			if !ok {
+				logger.Error("message(to client) channel closed")
+				return errors.ErrMsgChanClosed
+			}
 
-		msg := pb.MsgResponse{Type: msgType}
-		if err := stream.Send(&msg); err != nil {
-			logger.Error("failed to send message", zap.Any("msg", msg), zap.Error(err))
+			if err := stream.Send(msg); err != nil {
+				logger.Error("failed to send message", zap.Any("msg", msg), zap.Error(err))
+			}
+			logger.Info("successfully send message to client", zap.Any("msg", msg))
+		case msg, ok := <-s.clientMsgCh:
+			if !ok {
+				return errors.ErrMsgChanClosed
+			}
+			switch msg.Type {
+			case pb.MsgType_DisConnect:
+				logger.Warn("client is closing, so I'm quit...")
+				return nil
+			default:
+				logger.Error("client send bad message", zap.Any("msg", msg))
+			}
 		}
-		logger.Info("successfully send message to client", zap.Any("msg", msg))
 	}
 }
 
+// 获得公网监听
 func (s *service) getWANListen(ctx context.Context) (net.Listener, string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -167,22 +142,15 @@ func (s *service) getWANListen(ctx context.Context) (net.Listener, string, error
 
 	listenAddr := getListenAddrByToken(token[0])
 
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		logger.Error("failed to listen", zap.Error(err))
-		return nil, "", err
-	}
-	addrList := strings.Split(listener.Addr().String(), ":")
-	addr := fmt.Sprintf("%s:%s", s.wanIP, addrList[len(addrList)-1])
-	logger.Info("server listen at", zap.String("addr", addr))
-
-	return listener, addr, nil
+	return s.createListener(listenAddr)
 }
 
+// 这里应该改成根据数据库查
 func getListenAddrByToken(token string) string {
 	return "0.0.0.0:10033"
 }
 
+// 根据给定的地址创建一个监听器
 func (s *service) createListener(addr string) (net.Listener, string, error) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -191,18 +159,70 @@ func (s *service) createListener(addr string) (net.Listener, string, error) {
 	}
 	addrList := strings.Split(listener.Addr().String(), ":")
 	listenerAddr := fmt.Sprintf("%s:%s", s.wanIP, addrList[len(addrList)-1])
-	logger.Info("server listen at", zap.String("addr", addr))
+	logger.Info("server listen at", zap.String("addr", listenerAddr))
 
 	return listener, listenerAddr, nil
 }
 
-func (s *service) handleWANRequest(wanConn net.Conn) {
-	// 下发消息给客户端要求建立新的connection
-	s.msgTypeCh <- pb.MsgType_Connect
+// 客户端消息接收器
+func (s *service) receiveMsgFromClient(stream pb.ServerService_MsgServer) {
+	defer close(s.clientMsgCh)
 
-	// 等待新的connection
-	clientConn := <-s.clientConnCh
+	for {
+		req, err := stream.Recv()
+		if err != nil {
+			return
+		}
 
-	// 把两个connection串起来
-	dial.Join(wanConn, clientConn)
+		s.clientMsgCh <- req
+	}
+}
+
+// 公网请求处理器
+func (s *service) handleConnFromWAN(clientListenerAddr string) {
+	for {
+		wanConn, ok := <-s.wanConnCh
+		if !ok {
+			return
+		}
+
+		go func() {
+			// 下发消息给客户端要求建立新的connection
+			s.msgCh <- &pb.MsgResponse{Type: pb.MsgType_Connect, Data: []byte(clientListenerAddr)}
+
+			// 等待新的connection
+			clientConn := <-s.clientConnCh
+
+			// 把两个connection串起来
+			dial.Join(wanConn, clientConn)
+		}()
+	}
+}
+
+// 接收来自客户端的请求并且传递给channel
+func (s *service) receiveConnFromClient(client *peer.Peer, clientListener net.Listener) {
+	defer close(s.clientConnCh)
+
+	logger.Info("start to wait new connections from client...")
+	for {
+		conn, err := clientListener.Accept()
+		if err != nil {
+			return
+		}
+		s.clientConnCh <- conn
+	}
+}
+
+// 接收来自公网的请求并且传递给channel
+func (s *service) receiveConnFromWAN(client *peer.Peer, wanListener net.Listener) {
+	defer close(s.wanConnCh)
+
+	logger.Info("start to wait new connections from WAN...")
+	for {
+		conn, err := wanListener.Accept()
+		if err != nil {
+			return
+		}
+		s.wanConnCh <- conn
+	}
 }

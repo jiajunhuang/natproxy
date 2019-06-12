@@ -10,7 +10,7 @@ enum Code {
 enum MsgType {
     Connect = 0; // tell client to create a new connection to server
     WANAddr = 1; // listen address for WAN connection
-    ClientConnAddr = 2; // listen address for client connection
+    DisConnect = 2; // client tell server that please close the connection
 }
 
 // client register to server
