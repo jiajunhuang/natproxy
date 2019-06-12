@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 )
 
 var (
@@ -36,7 +37,9 @@ func Start(addr, wanIP string) {
 }
 
 type service struct {
-	wanIP string
+	wanIP        string
+	wanConnCh    chan net.Conn // connections from WAN
+	clientConnCh chan net.Conn // connections from client
 }
 
 func newService(wanIP string) *service {
@@ -54,15 +57,75 @@ func (s *service) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginRes
 }
 
 func (s *service) Msg(stream pb.ServerService_MsgServer) error {
-	md, ok := metadata.FromIncomingContext(stream.Context())
+	defer close(s.wanConnCh)
+
+	ctx := stream.Context()
+
+	remote, ok := peer.FromContext(ctx)
+	logger.Info("client connected", zap.Any("remote", remote), zap.Bool("ok", ok))
+
+	// get listener for current user
+	wanListener, wanListenerAddr, err := s.getWANListen(ctx)
+	if err != nil {
+		logger.Error("failed to create listener for WAN ", zap.Error(err))
+		return err
+	}
+	defer wanListener.Close()
+	// TODO 下发消息给客户端告知公网地址
+	_ = wanListenerAddr
+	go func() {
+		for {
+			conn, err := wanListener.Accept()
+			if err != nil {
+				logger.Error("failed to accept new connection for WAN", zap.Any("remote", remote), zap.Error(err))
+				break
+			}
+			s.wanConnCh <- conn
+		}
+	}()
+
+	// create a listener for client
+	clientListener, clientListenerAddr, err := s.createListener("0.0.0.0:0")
+	if err != nil {
+		logger.Error("failed to create listener for client", zap.Error(err))
+		return err
+	}
+	defer clientListener.Close()
+	// TODO 下发消息给客户端告知客户端应该连接的公网地址
+	_ = clientListenerAddr
+	go func() {
+		for {
+			conn, err := clientListener.Accept()
+			if err != nil {
+				logger.Error("failed to accept new connection for client", zap.Any("remote", remote), zap.Error(err))
+				break
+			}
+			s.clientConnCh <- conn
+		}
+		logger.Info("listener for client closing...")
+	}()
+
+	for {
+		conn, ok := <-s.wanConnCh
+		if !ok {
+			logger.Error("connection channel closed")
+			return errors.ErrConnectionChClosed
+		}
+
+		go s.handleWANRequest(conn)
+	}
+}
+
+func (s *service) getWANListen(ctx context.Context) (net.Listener, string, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		logger.Error("bad metadata", zap.Any("metadata", md))
-		return errors.ErrBadMetadata
+		return nil, "", errors.ErrBadMetadata
 	}
 	token := md.Get("natrp-token")
 	if len(token) != 1 {
 		logger.Error("bad token in metadata", zap.Any("token", token))
-		return errors.ErrBadMetadata
+		return nil, "", errors.ErrBadMetadata
 	}
 
 	listenAddr := getListenAddrByToken(token[0])
@@ -70,52 +133,36 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		logger.Error("failed to listen", zap.Error(err))
-		return err
+		return nil, "", err
 	}
-	defer listener.Close()
 	addrList := strings.Split(listener.Addr().String(), ":")
 	addr := fmt.Sprintf("%s:%s", s.wanIP, addrList[len(addrList)-1])
 	logger.Info("server listen at", zap.String("addr", addr))
 
-	conn, err := listener.Accept()
-	if err != nil {
-		logger.Error("failed to accept", zap.Error(err))
-		return err
-	}
-	defer conn.Close()
-
-	go func() {
-		defer conn.Close()
-
-		for {
-			req, err := stream.Recv()
-			if err != nil {
-				logger.Error("failed to read", zap.Error(err))
-				return
-			}
-
-			if _, err := conn.Write(req.Data); err != nil {
-				logger.Error("failed to write", zap.Error(err))
-				return
-			}
-		}
-	}()
-
-	data := make([]byte, 1024)
-	for {
-		n, err := conn.Read(data)
-		if err != nil {
-			logger.Error("failed to read", zap.Error(err))
-			return err
-		}
-
-		if err := stream.Send(&pb.MsgResponse{Data: data[:n]}); err != nil {
-			logger.Error("failed to write", zap.Error(err))
-			return err
-		}
-	}
+	return listener, addr, nil
 }
 
 func getListenAddrByToken(token string) string {
 	return "0.0.0.0:10033"
+}
+
+func (s *service) createListener(addr string) (net.Listener, string, error) {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		logger.Error("failed to listen", zap.Error(err))
+		return nil, "", err
+	}
+	addrList := strings.Split(listener.Addr().String(), ":")
+	listenerAddr := fmt.Sprintf("%s:%s", s.wanIP, addrList[len(addrList)-1])
+	logger.Info("server listen at", zap.String("addr", addr))
+
+	return listener, listenerAddr, nil
+}
+
+func (s *service) handleWANRequest(wanConn net.Conn) {
+	// 下发消息给客户端要求建立新的connection
+
+	// 等待新的connection
+
+	// 把两个connection串起来
 }
