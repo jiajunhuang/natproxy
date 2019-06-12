@@ -3,14 +3,12 @@ package server
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"strings"
-	"sync"
 
+	"github.com/jiajunhuang/natproxy/dial"
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
-	"github.com/jiajunhuang/natproxy/pool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -200,25 +198,5 @@ func (s *service) handleWANRequest(wanConn net.Conn) {
 	clientConn := <-s.clientConnCh
 
 	// 把两个connection串起来
-	join(wanConn, clientConn)
-}
-
-// join two io.ReadWriteCloser and do some operations.
-func join(c1 io.ReadWriteCloser, c2 io.ReadWriteCloser) (inCount int64, outCount int64) {
-	var wait sync.WaitGroup
-	pipe := func(to io.ReadWriteCloser, from io.ReadWriteCloser, count *int64) {
-		defer to.Close()
-		defer from.Close()
-		defer wait.Done()
-
-		buf := pool.GetBuf(16 * 1024)
-		defer pool.PutBuf(buf)
-		*count, _ = io.CopyBuffer(to, from, buf)
-	}
-
-	wait.Add(2)
-	go pipe(c1, c2, &inCount)
-	go pipe(c2, c1, &outCount)
-	wait.Wait()
-	return
+	dial.Join(wanConn, clientConn)
 }
