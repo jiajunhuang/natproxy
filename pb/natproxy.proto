@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package pb;
+
+enum Code {
+    CodeSucceed = 0;
+    CodeFailed = 1;
+}
+
+enum MsgType {
+    Connect = 0; // tell client to create a new connection to server
+}
+
+// client register to server
+
+message RegisterRequest {
+    string email = 1;
+    string password = 2;
+}
+
+message RegisterResponse {
+    Code code = 1;
+    string msg = 2;
+}
+
+// client login to server
+
+message LoginRequest {
+    string email = 1;
+    string password = 2;
+    string os = 3; // operating system
+    string version = 4; // client version
+}
+
+message LoginResponse {
+    Code code = 1;
+    string msg = 2;
+    string addr = 3; // listener address for client
+    string token = 4;
+}
+
+// for server send command to client
+
+message MsgRequest {
+    MsgType type = 1;
+    bytes data = 2;
+}
+
+message MsgResponse {
+    MsgType type = 1;
+    bytes data = 2;
+}
+
+service ServerService {
+    rpc Register(RegisterRequest) returns (RegisterResponse) {}
+    rpc Login(LoginRequest) returns (LoginResponse) {}
+    rpc Msg(stream MsgRequest) returns (stream MsgResponse) {}
+}
