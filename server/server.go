@@ -151,7 +151,12 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 
 	// 如果已经分配过公网地址
 	if addr != "" {
-		return addr, nil
+		addrList := strings.Split(addr, ":")
+		// 如果上次分配的地址是本机，那么直接返回，否则，就应该重新分配
+		if addrList[0] == s.wanIP {
+			listenerAddr := fmt.Sprintf("0.0.0.0:%s", addrList[len(addrList)-1])
+			return listenerAddr, nil
+		}
 	}
 
 	// 没有分配过公网监听地址，那就在 15000 ~ 32767 之间分配一个
@@ -203,8 +208,7 @@ func (s *service) createListener(addr string) (net.Listener, string, error) {
 		return nil, "", err
 	}
 	addrList := strings.Split(listener.Addr().String(), ":")
-	listenerAddr := fmt.Sprintf("%s:%s", s.wanIP, addrList[len(addrList)-1])
-	logger.Info("server listen at", zap.String("addr", listenerAddr))
+	listenerAddr := fmt.Sprintf("0.0.0.0:%s", addrList[len(addrList)-1])
 
 	return listener, listenerAddr, nil
 }
