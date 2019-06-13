@@ -74,7 +74,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 
 	// 启动客户端监听
 	// ref: https://en.wikipedia.org/wiki/Ephemeral_port 一般Linux的port范围是32768 ~ 61000
-	clientListener, clientListenerAddr, err := s.createListener("0.0.0.0:0")
+	clientListener, clientListenerAddr, err := s.createListenerByPort("0")
 	if err != nil {
 		logger.Error("failed to create listener for client", zap.Error(err))
 		return err
@@ -131,8 +131,10 @@ func (s *service) getWANListen(ctx context.Context) (net.Listener, string, error
 	if err != nil {
 		return nil, listenAddr, err
 	}
+	addrList := strings.Split(listenAddr, ":")
+	port := addrList[len(addrList)-1]
 
-	return s.createListener(listenAddr)
+	return s.createListenerByPort(port)
 }
 
 // 根据token查询
@@ -194,16 +196,16 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 }
 
 // 根据给定的地址创建一个监听器
-func (s *service) createListener(addr string) (net.Listener, string, error) {
-	listener, err := net.Listen("tcp", addr)
+func (s *service) createListenerByPort(port string) (net.Listener, string, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%s", port))
 	if err != nil {
 		logger.Error("failed to listen", zap.Error(err))
 		return nil, "", err
 	}
 	addrList := strings.Split(listener.Addr().String(), ":")
-	listenerAddr := fmt.Sprintf("0.0.0.0:%s", addrList[len(addrList)-1])
+	port = addrList[len(addrList)-1]
 
-	return listener, listenerAddr, nil
+	return listener, fmt.Sprintf("%s:%s", s.wanIP, port), nil
 }
 
 // 没有分配过公网监听地址，那就在 15000 ~ 32767 之间分配一个
