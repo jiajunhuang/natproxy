@@ -68,6 +68,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 		return err
 	}
 	defer wanListener.Close()
+	logger.Info("WAN listener listen at", zap.String("wan addr", wanListenerAddr), zap.Any("client", client), zap.String("token", getToken(ctx)))
 	go manager.receiveConnFromWAN(client, wanListener)
 	manager.msgCh <- &pb.MsgResponse{Type: pb.MsgType_WANAddr, Data: []byte(wanListenerAddr)}
 
@@ -79,6 +80,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 		return err
 	}
 	defer clientListener.Close()
+	logger.Info("client listener listen at", zap.String("client addr", wanListenerAddr), zap.Any("client", client), zap.String("token", getToken(ctx)))
 	go manager.receiveConnFromClient(client, clientListener)
 
 	// 处理来自公网请求
@@ -123,18 +125,9 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 
 // 获得公网监听
 func (s *service) getWANListen(ctx context.Context) (net.Listener, string, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		logger.Error("bad metadata", zap.Any("metadata", md))
-		return nil, "", errors.ErrBadMetadata
-	}
-	token := md.Get("natrp-token")
-	if len(token) != 1 {
-		logger.Error("bad token in metadata", zap.Any("token", token))
-		return nil, "", errors.ErrBadMetadata
-	}
+	token := getToken(ctx)
 
-	listenAddr, err := s.getListenAddrByToken(token[0])
+	listenAddr, err := s.getListenAddrByToken(token)
 	if err != nil {
 		return nil, listenAddr, err
 	}
@@ -219,4 +212,19 @@ func (s *service) getRandomPort() int {
 	min := 15000
 
 	return rand.Intn(max-min) + min
+}
+
+func getToken(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		logger.Error("bad metadata", zap.Any("metadata", md))
+		return ""
+	}
+	token := md.Get("natrp-token")
+	if len(token) != 1 {
+		logger.Error("bad token in metadata", zap.Any("token", token))
+		return ""
+	}
+
+	return token[0]
 }
