@@ -32,7 +32,7 @@ func Start(addr, wanIP string, bufSize int) {
 	server := grpc.NewServer()
 
 	pb.RegisterServerServiceServer(server, svc)
-	logger.Info("server start to listen", zap.String("addr", addr))
+	logger.Info("server start to listen", zap.String("addr", addr), zap.String("wanip", wanIP), zap.Int("bufSize", bufSize))
 	if err := server.Serve(listener); err != nil {
 		logger.Fatal("failed to serve", zap.Error(err))
 	}
@@ -157,6 +157,10 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 	// 没有分配过公网监听地址，那就在 15000 ~ 32767 之间分配一个
 	retry := 0
 	for {
+		if retry > 20 {
+			return "", errors.ErrFailedToAllocatePort
+		}
+
 		port := s.getRandomPort()
 		logger.Info("trying to listen port", zap.Int("port", port))
 		l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
@@ -166,6 +170,7 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 			continue
 		}
 		l.Close()
+		logger.Info("port is ok to listen, try to check if the port is already taken by others", zap.Int("port", port))
 
 		// 检查一下是否被其他用户分配过
 		addr = fmt.Sprintf("%s:%d", s.wanIP, port)
@@ -176,7 +181,7 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 		}
 
 		if taken {
-			logger.Info("addr had been taken", zap.String("addr", addr))
+			logger.Error("addr had been taken", zap.String("addr", addr))
 			retry++
 			continue
 		}
@@ -186,9 +191,7 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 			return "", err
 		}
 
-		if retry > 20 {
-			return "", errors.ErrFailedToAllocatePort
-		}
+		return addr, nil
 	}
 }
 

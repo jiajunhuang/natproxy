@@ -69,8 +69,8 @@ func registerAddr(token, addr string) error {
 	respJSON := &respJSON{}
 
 	type RegisterAddr struct {
-		Token string
-		Addr  string
+		Token string `json:"token"`
+		Addr  string `json:"addr"`
 	}
 	jsonBytes, err := json.Marshal(&RegisterAddr{Token: token, Addr: addr})
 	if err != nil {
