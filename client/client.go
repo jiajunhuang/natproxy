@@ -4,12 +4,20 @@ import (
 	"context"
 	"flag"
 	"net"
+	"runtime"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/jiajunhuang/natproxy/dial"
 	"github.com/jiajunhuang/natproxy/pb"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/metadata"
+)
+
+const (
+	version = "0.0.1"
+	arch    = runtime.GOARCH
+	os      = runtime.GOOS
 )
 
 var (
@@ -54,8 +62,18 @@ func waitMsgFromServer(addr string) {
 		logger.Error("failed to communicate with server", zap.Error(err))
 		return
 	}
-
 	logger.Info("success to connect to server", zap.String("addr", *serverAddr))
+
+	// report client version info
+	data, err := proto.Marshal(&pb.ClientInfo{Os: os, Arch: arch, Version: version})
+	if err != nil {
+		logger.Error("failed to marshal message", zap.Error(err))
+		return
+	}
+	if err := stream.Send(&pb.MsgRequest{Type: pb.MsgType_Report, Data: data}); err != nil {
+		logger.Error("failed to talk with server", zap.Error(err))
+		return
+	}
 
 	for {
 		resp, err := stream.Recv()

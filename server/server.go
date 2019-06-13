@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/jiajunhuang/natproxy/dial"
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
@@ -67,14 +68,6 @@ func newManager(svc *service, bufSize int) *manager {
 	}
 }
 
-func (s *service) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	return nil, nil
-}
-
-func (s *service) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
-	return nil, nil
-}
-
 func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	manager := newManager(s, s.bufSize)
 	defer close(manager.msgCh)
@@ -133,6 +126,12 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 			case pb.MsgType_DisConnect:
 				logger.Warn("client is closing, so I'm quit...")
 				return nil
+			case pb.MsgType_Report:
+				var clientInfo pb.ClientInfo
+				if err = proto.Unmarshal(msg.Data, &clientInfo); err != nil {
+					logger.Error("failed to unmarshal client info", zap.ByteString("data", msg.Data), zap.Error(err))
+				}
+				logger.Info("client report info", zap.Any("info", clientInfo), zap.Any("client", client))
 			default:
 				logger.Error("client send bad message", zap.Any("msg", msg))
 			}
