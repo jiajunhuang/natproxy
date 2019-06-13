@@ -97,6 +97,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	manager.msgCh <- &pb.MsgResponse{Type: pb.MsgType_WANAddr, Data: []byte(wanListenerAddr)}
 
 	// 启动客户端监听
+	// ref: https://en.wikipedia.org/wiki/Ephemeral_port 一般Linux的port范围是32768 ~ 61000
 	clientListener, clientListenerAddr, err := s.createListener("0.0.0.0:0")
 	if err != nil {
 		logger.Error("failed to create listener for client", zap.Error(err))
