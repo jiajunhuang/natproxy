@@ -5,6 +5,7 @@ import (
 	"flag"
 	"net"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -44,14 +45,14 @@ func connectServer(addr string) {
 	dial.Join(conn, localConn)
 }
 
-func waitMsgFromServer(addr string) {
+func waitMsgFromServer(addr string) error {
 	md := metadata.Pairs("natrp-token", *token)
 	ctx := metadata.NewOutgoingContext(context.Background(), md)
 
 	client, conn, err := dial.WithServer(ctx, *serverAddr, false)
 	if err != nil {
 		logger.Error("failed to connect to server server", zap.Error(err))
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -60,7 +61,7 @@ func waitMsgFromServer(addr string) {
 	stream, err := client.Msg(ctx)
 	if err != nil {
 		logger.Error("failed to communicate with server", zap.Error(err))
-		return
+		return err
 	}
 	logger.Info("success to connect to server", zap.String("addr", *serverAddr))
 
@@ -68,18 +69,18 @@ func waitMsgFromServer(addr string) {
 	data, err := proto.Marshal(&pb.ClientInfo{Os: os, Arch: arch, Version: version})
 	if err != nil {
 		logger.Error("failed to marshal message", zap.Error(err))
-		return
+		return err
 	}
 	if err := stream.Send(&pb.MsgRequest{Type: pb.MsgType_Report, Data: data}); err != nil {
 		logger.Error("failed to talk with server", zap.Error(err))
-		return
+		return err
 	}
 
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
 			logger.Error("failed to receive message from server", zap.Error(err))
-			return
+			return err
 		}
 
 		switch resp.Type {
@@ -97,7 +98,11 @@ func waitMsgFromServer(addr string) {
 // Start client
 func Start() {
 	for {
-		waitMsgFromServer(*serverAddr)
+		err := waitMsgFromServer(*serverAddr)
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "token not valid") {
+			break
+		}
 		time.Sleep(time.Second * 5)
 	}
 }

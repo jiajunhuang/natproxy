@@ -3,11 +3,11 @@ package server
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/jiajunhuang/natproxy/dial"
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
 	"go.uber.org/zap"
@@ -43,28 +43,10 @@ type service struct {
 	bufSize int
 }
 
-type manager struct {
-	service      *service
-	wanConnCh    chan net.Conn        // connections from WAN
-	clientConnCh chan net.Conn        // connections from client
-	msgCh        chan *pb.MsgResponse // messages send to client
-	clientMsgCh  chan *pb.MsgRequest  // messages from client
-}
-
 func newService(wanIP string, bufSize int) *service {
 	return &service{
 		wanIP:   wanIP,
 		bufSize: bufSize,
-	}
-}
-
-func newManager(svc *service, bufSize int) *manager {
-	return &manager{
-		service:      svc,
-		wanConnCh:    make(chan net.Conn, bufSize),
-		clientConnCh: make(chan net.Conn, bufSize),
-		msgCh:        make(chan *pb.MsgResponse, bufSize),
-		clientMsgCh:  make(chan *pb.MsgRequest, bufSize),
 	}
 }
 
@@ -152,14 +134,62 @@ func (s *service) getWANListen(ctx context.Context) (net.Listener, string, error
 		return nil, "", errors.ErrBadMetadata
 	}
 
-	listenAddr := getListenAddrByToken(token[0])
+	listenAddr, err := s.getListenAddrByToken(token[0])
+	if err != nil {
+		return nil, listenAddr, err
+	}
 
 	return s.createListener(listenAddr)
 }
 
-// 这里应该改成根据数据库查
-func getListenAddrByToken(token string) string {
-	return "0.0.0.0:10033"
+// 根据token查询
+func (s *service) getListenAddrByToken(token string) (string, error) {
+	addr, err := getAddrByToken(token)
+	if err != nil {
+		return "", err
+	}
+
+	// 如果已经分配过公网地址
+	if addr != "" {
+		return addr, nil
+	}
+
+	// 没有分配过公网监听地址，那就在 15000 ~ 32767 之间分配一个
+	retry := 0
+	for {
+		port := s.getRandomPort()
+		logger.Info("trying to listen port", zap.Int("port", port))
+		l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
+		if err != nil {
+			logger.Error("port can't be listened", zap.Int("port", port), zap.Error(err))
+			retry++
+			continue
+		}
+		l.Close()
+
+		// 检查一下是否被其他用户分配过
+		addr = fmt.Sprintf("%s:%d", s.wanIP, port)
+		taken, err := checkIfAddrAlreadyTaken(addr)
+		if err != nil {
+			logger.Error("failed to check if addr already been taken by others", zap.String("addr", addr), zap.Error(err))
+			return "", err
+		}
+
+		if taken {
+			logger.Info("addr had been taken", zap.String("addr", addr))
+			retry++
+			continue
+		}
+
+		if err = registerAddr(token, addr); err != nil {
+			logger.Error("failed to register addr", zap.String("addr", addr), zap.Error(err))
+			return "", err
+		}
+
+		if retry > 20 {
+			return "", errors.ErrFailedToAllocatePort
+		}
+	}
 }
 
 // 根据给定的地址创建一个监听器
@@ -176,71 +206,10 @@ func (s *service) createListener(addr string) (net.Listener, string, error) {
 	return listener, listenerAddr, nil
 }
 
-// 客户端消息接收器
-func (manager *manager) receiveMsgFromClient(stream pb.ServerService_MsgServer) {
-	defer close(manager.clientMsgCh)
+// 没有分配过公网监听地址，那就在 15000 ~ 32767 之间分配一个
+func (s *service) getRandomPort() int {
+	max := 32767
+	min := 15000
 
-	for {
-		req, err := stream.Recv()
-		if err != nil {
-			return
-		}
-
-		manager.clientMsgCh <- req
-	}
-}
-
-// 公网请求处理器
-func (manager *manager) handleConnFromWAN(clientListenerAddr string) {
-	for {
-		wanConn, ok := <-manager.wanConnCh
-		if !ok {
-			return
-		}
-
-		go func() {
-			// 下发消息给客户端要求建立新的connection
-			manager.msgCh <- &pb.MsgResponse{Type: pb.MsgType_Connect, Data: []byte(clientListenerAddr)}
-
-			// 等待新的connection
-			clientConn, ok := <-manager.clientConnCh
-			if !ok {
-				logger.Error("failed to receive connection from client connection channel")
-				return
-			}
-			wanConnAddr, clientConnAddr := wanConn.LocalAddr(), clientConn.RemoteAddr()
-			defer logger.Info("connection between WAN & client disconnected", zap.Any("wanConn", wanConnAddr), zap.Any("clientConn", clientConnAddr))
-
-			// 把两个connection串起来
-			dial.Join(wanConn, clientConn)
-		}()
-	}
-}
-
-// 接收来自客户端的请求并且传递给channel
-func (manager *manager) receiveConnFromClient(client *peer.Peer, clientListener net.Listener) {
-	defer close(manager.clientConnCh)
-
-	logger.Info("start to wait new connections from client...")
-	for {
-		conn, err := clientListener.Accept()
-		if err != nil {
-			return
-		}
-		manager.clientConnCh <- conn
-	}
-}
-
-// 接收来自公网的请求并且传递给channel
-func (manager *manager) receiveConnFromWAN(client *peer.Peer, wanListener net.Listener) {
-	defer close(manager.wanConnCh)
-
-	logger.Info("start to wait new connections from WAN...")
-	for {
-		conn, err := wanListener.Accept()
-		if err != nil {
-			return
-		}
-		manager.wanConnCh <- conn
-	}
+	return rand.Intn(max-min) + min
 }

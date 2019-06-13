@@ -19,4 +19,10 @@ var (
 	ErrConnectionChClosed = errors.New("connection channel already closed")
 	// ErrMsgChanClosed message type channel been closed
 	ErrMsgChanClosed = errors.New("message type channel already closed")
+	// ErrFailedToAllocatePort failed to allocate port
+	ErrFailedToAllocatePort = errors.New("failed to allocate port for user")
+	// ErrTokenNotValid token not valid
+	ErrTokenNotValid = errors.New("token not valid")
+	// ErrFailedToRegisterAddr failed to register addr
+	ErrFailedToRegisterAddr = errors.New("failed to register addr")
 )
