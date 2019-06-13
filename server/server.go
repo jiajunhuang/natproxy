@@ -201,8 +201,13 @@ func (manager *manager) handleConnFromWAN(clientListenerAddr string) {
 			manager.msgCh <- &pb.MsgResponse{Type: pb.MsgType_Connect, Data: []byte(clientListenerAddr)}
 
 			// 等待新的connection
-			clientConn := <-manager.clientConnCh
-			defer logger.Info("connection between WAN & client disconnected", zap.Any("wanConn", wanConn.LocalAddr()), zap.Any("clientConn", clientConn.RemoteAddr()))
+			clientConn, ok := <-manager.clientConnCh
+			if !ok {
+				logger.Error("failed to receive connection from client connection channel")
+				return
+			}
+			wanConnAddr, clientConnAddr := wanConn.LocalAddr(), clientConn.RemoteAddr()
+			defer logger.Info("connection between WAN & client disconnected", zap.Any("wanConn", wanConnAddr), zap.Any("clientConn", clientConnAddr))
 
 			// 把两个connection串起来
 			dial.Join(wanConn, clientConn)
