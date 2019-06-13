@@ -20,14 +20,14 @@ var (
 )
 
 // Start gRPC server
-func Start(addr, wanIP string) {
+func Start(addr, wanIP string, bufSize int) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		logger.Fatal("failed to listen", zap.String("addr", addr))
 	}
 
 	// register service
-	svc := newService(wanIP)
+	svc := newService(wanIP, bufSize)
 	server := grpc.NewServer()
 
 	pb.RegisterServerServiceServer(server, svc)
@@ -38,7 +38,8 @@ func Start(addr, wanIP string) {
 }
 
 type service struct {
-	wanIP string
+	wanIP   string
+	bufSize int
 }
 
 type manager struct {
@@ -49,19 +50,20 @@ type manager struct {
 	clientMsgCh  chan *pb.MsgRequest  // messages from client
 }
 
-func newService(wanIP string) *service {
+func newService(wanIP string, bufSize int) *service {
 	return &service{
-		wanIP: wanIP,
+		wanIP:   wanIP,
+		bufSize: bufSize,
 	}
 }
 
-func newManager(svc *service) *manager {
+func newManager(svc *service, bufSize int) *manager {
 	return &manager{
 		service:      svc,
-		wanConnCh:    make(chan net.Conn, 16),
-		clientConnCh: make(chan net.Conn, 16),
-		msgCh:        make(chan *pb.MsgResponse, 16),
-		clientMsgCh:  make(chan *pb.MsgRequest, 16),
+		wanConnCh:    make(chan net.Conn, bufSize),
+		clientConnCh: make(chan net.Conn, bufSize),
+		msgCh:        make(chan *pb.MsgResponse, bufSize),
+		clientMsgCh:  make(chan *pb.MsgRequest, bufSize),
 	}
 }
 
@@ -74,7 +76,7 @@ func (s *service) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginRes
 }
 
 func (s *service) Msg(stream pb.ServerService_MsgServer) error {
-	manager := newManager(s)
+	manager := newManager(s, s.bufSize)
 	defer close(manager.msgCh)
 
 	ctx := stream.Context()

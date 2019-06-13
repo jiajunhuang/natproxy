@@ -57,11 +57,6 @@ func waitMsgFromServer(addr string) {
 
 	logger.Info("success to connect to server", zap.String("addr", *serverAddr))
 
-	defer func() { // send a message to server that the client is closing
-		logger.Info("told server that I'm closing...")
-		stream.Send(&pb.MsgRequest{Type: pb.MsgType_DisConnect})
-	}()
-
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
