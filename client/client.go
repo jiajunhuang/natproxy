@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version = "0.0.5"
+	version = "0.0.6"
 	arch    = runtime.GOARCH
 	os      = runtime.GOOS
 )
@@ -26,12 +26,19 @@ const (
 var (
 	logger, _ = zap.NewProduction()
 
-	localAddr        = flag.String("local", "127.0.0.1:80", "-local=<你本地需要转发的地址>")
-	serverAddr       = flag.String("server", "127.0.0.1:10020", "-server=<你的服务器地址>")
+	localAddr        = flag.String("local", "127.0.0.1:8080", "-local=<你本地需要转发的地址>")
+	serverAddr       = flag.String("server", "natproxy.laizuoceshi.com:8443", "-server=<你的服务器地址>")
 	token            = flag.String("token", "balalaxiaomoxian", "-token=<你的token>")
 	useTLS           = flag.Bool("tls", true, "-tls=true 默认使用TLS加密")
 	clientDisconnect int32
 )
+
+func checkAnnoncements() {
+	annoncement := tools.GetAnnouncement()
+	if annoncement != "" {
+		logger.Warn("最新公告", zap.String("公告内容", annoncement))
+	}
+}
 
 func checkClientStatus() {
 	for {
@@ -133,6 +140,7 @@ func waitMsgFromServer(addr string) error {
 // Start client
 func Start() {
 	go checkClientStatus()
+	go checkAnnoncements()
 	for {
 		err := waitMsgFromServer(*serverAddr)
 		errMsg := err.Error()

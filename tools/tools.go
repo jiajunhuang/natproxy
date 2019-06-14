@@ -118,3 +118,25 @@ func RegisterAddr(token, addr string) error {
 
 	return nil
 }
+
+// GetAnnouncement 获取公告
+func GetAnnouncement() string {
+	url := *toolsAPIAddr + "/api/v1/natproxy/annoncement"
+	respJSON := &respJSON{}
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if err = json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
+		return ""
+	}
+
+	if respJSON.Code != 200 {
+		return ""
+	}
+
+	return respJSON.Msg
+}
