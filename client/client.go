@@ -102,6 +102,7 @@ func Start() {
 		err := waitMsgFromServer(*serverAddr)
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "token not valid") {
+			logger.Error("您的token不对，请检查是否正确配置，参考：https://jiajunhuang.com/natproxy")
 			break
 		}
 		time.Sleep(time.Second * 5)
