@@ -3,12 +3,12 @@ package dial
 import (
 	"context"
 	"crypto/tls"
+	"flag"
 	"io"
 	"sync"
 
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
-	"github.com/jiajunhuang/natproxy/pool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -16,6 +16,8 @@ import (
 
 var (
 	logger, _ = zap.NewProduction()
+
+	socketBufferSize = flag.Int("socketBufferSize", 1024*32, "连接缓冲区大小，越大越快，但是也更吃内存")
 )
 
 // WithServer dial with server
@@ -53,8 +55,8 @@ func Join(c1 io.ReadWriteCloser, c2 io.ReadWriteCloser) (inCount int64, outCount
 		defer c2.Close()
 		defer wait.Done()
 
-		buf := pool.GetBuf(16 * 1024)
-		defer pool.PutBuf(buf)
+		buf := make([]byte, *socketBufferSize)
+
 		*count, _ = io.CopyBuffer(to, from, buf)
 	}
 

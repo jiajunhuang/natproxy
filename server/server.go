@@ -10,6 +10,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
+	"github.com/jiajunhuang/natproxy/tools"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -139,7 +140,7 @@ func (s *service) getWANListen(ctx context.Context) (net.Listener, string, error
 
 // 根据token查询
 func (s *service) getListenAddrByToken(token string) (string, error) {
-	addr, err := getAddrByToken(token)
+	addr, err := tools.GetAddrByToken(token)
 	if err != nil {
 		return "", err
 	}
@@ -174,7 +175,7 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 
 		// 检查一下是否被其他用户分配过
 		addr = fmt.Sprintf("%s:%d", s.wanIP, port)
-		taken, err := checkIfAddrAlreadyTaken(addr)
+		taken, err := tools.CheckIfAddrAlreadyTaken(addr)
 		if err != nil {
 			logger.Error("failed to check if addr already been taken by others", zap.String("addr", addr), zap.Error(err))
 			return "", err
@@ -186,7 +187,7 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 			continue
 		}
 
-		if err = registerAddr(token, addr); err != nil {
+		if err = tools.RegisterAddr(token, addr); err != nil {
 			logger.Error("failed to register addr", zap.String("addr", addr), zap.Error(err))
 			return "", err
 		}

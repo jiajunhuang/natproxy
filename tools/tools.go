@@ -1,4 +1,4 @@
-package server
+package tools
 
 import (
 	"bytes"
@@ -17,11 +17,13 @@ type respJSON struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 	Data struct {
-		Addr string `json:"addr"`
+		Disconnect bool   `json:"disconnect"`
+		Addr       string `json:"addr"`
 	}
 }
 
-func getAddrByToken(token string) (string, error) {
+// GetAddrByToken 根据token拿已分配的公网地址
+func GetAddrByToken(token string) (string, error) {
 	url := *toolsAPIAddr + "/api/v1/natproxy/check_token?token=" + token
 	respJSON := &respJSON{}
 
@@ -42,7 +44,8 @@ func getAddrByToken(token string) (string, error) {
 	return "", errors.ErrTokenNotValid
 }
 
-func checkIfAddrAlreadyTaken(addr string) (bool, error) {
+// CheckIfAddrAlreadyTaken 检查地址是否已经被分配
+func CheckIfAddrAlreadyTaken(addr string) (bool, error) {
 	url := *toolsAPIAddr + "/api/v1/natproxy/addr?addr=" + addr
 	respJSON := &respJSON{}
 
@@ -63,7 +66,8 @@ func checkIfAddrAlreadyTaken(addr string) (bool, error) {
 	return false, nil
 }
 
-func registerAddr(token, addr string) error {
+// RegisterAddr 注册地址
+func RegisterAddr(token, addr string) error {
 	// 向中心注册这个地址
 	url := *toolsAPIAddr + "/api/v1/natproxy/addr"
 	respJSON := &respJSON{}
