@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"strings"
@@ -11,21 +12,16 @@ import (
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
 	"github.com/jiajunhuang/natproxy/tools"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
-)
-
-var (
-	logger, _ = zap.NewProduction()
 )
 
 // Start gRPC server
 func Start(addr, wanIP string, bufSize int) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		logger.Fatal("failed to listen", zap.String("addr", addr))
+		log.Printf("failed to listen at addr %s", addr)
 	}
 
 	// register service
@@ -33,9 +29,9 @@ func Start(addr, wanIP string, bufSize int) {
 	server := grpc.NewServer()
 
 	pb.RegisterServerServiceServer(server, svc)
-	logger.Info("server start to listen", zap.String("addr", addr), zap.String("wanip", wanIP), zap.Int("bufSize", bufSize))
+	log.Printf("server start to listen at %s, WAN ip is %s, bufSize is %d", addr, wanIP, bufSize)
 	if err := server.Serve(listener); err != nil {
-		logger.Fatal("failed to serve", zap.Error(err))
+		log.Fatalf("failed to serve: %s", err)
 	}
 }
 
@@ -56,20 +52,21 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	defer close(manager.msgCh)
 
 	ctx := stream.Context()
+	token := getToken(ctx)
 
 	// 获取客户端信息
 	client, ok := peer.FromContext(ctx)
-	logger.Info("client connected", zap.Any("client", client), zap.Bool("ok", ok))
-	defer logger.Info("client disconnected", zap.Any("client", client))
+	log.Printf("client(%s) connected, ok: %t", client, ok)
+	defer log.Printf("client(%s) disconnected", client)
 
 	// 启动公网端口监听 && 下发消息给客户端告知公网地址
 	wanListener, wanListenerAddr, err := s.getWANListen(ctx)
 	if err != nil {
-		logger.Error("failed to create listener for WAN ", zap.Error(err))
+		log.Printf("failed to create listener for WAN: %s", err)
 		return err
 	}
 	defer wanListener.Close()
-	logger.Info("WAN listener listen at", zap.String("wan addr", wanListenerAddr), zap.Any("client", client), zap.String("token", getToken(ctx)))
+	log.Printf("client(%s, token: %s)'s WAN listener listen at %s", client, token, wanListenerAddr)
 	go manager.receiveConnFromWAN(client, wanListener)
 	manager.msgCh <- &pb.MsgResponse{Type: pb.MsgType_WANAddr, Data: []byte(wanListenerAddr)}
 
@@ -77,11 +74,11 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 	// ref: https://en.wikipedia.org/wiki/Ephemeral_port 一般Linux的port范围是32768 ~ 61000
 	clientListener, clientListenerAddr, err := s.createListenerByPort("0")
 	if err != nil {
-		logger.Error("failed to create listener for client", zap.Error(err))
+		log.Printf("failed to create listener for client: %s", err)
 		return err
 	}
 	defer clientListener.Close()
-	logger.Info("client listener listen at", zap.String("client addr", wanListenerAddr), zap.Any("client", client), zap.String("token", getToken(ctx)))
+	log.Printf("client(%s, token: %s) listener listen at %s", client, token, clientListenerAddr)
 	go manager.receiveConnFromClient(client, clientListener)
 
 	// 处理来自公网请求
@@ -95,30 +92,30 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 		select {
 		case msg, ok := <-manager.msgCh:
 			if !ok {
-				logger.Error("message(to client) channel closed")
+				log.Printf("message(to client) channel closed")
 				return errors.ErrMsgChanClosed
 			}
 
 			if err := stream.Send(msg); err != nil {
-				logger.Error("failed to send message", zap.Any("msg", msg), zap.Error(err))
+				log.Printf("failed to send message(%s): %s", msg, err)
 			}
-			logger.Info("successfully send message to client", zap.Any("msg", msg))
+			log.Printf("successfully send message(%s) to client", msg)
 		case msg, ok := <-manager.clientMsgCh:
 			if !ok {
 				return errors.ErrMsgChanClosed
 			}
 			switch msg.Type {
 			case pb.MsgType_DisConnect:
-				logger.Warn("client ask me to disconnect")
+				log.Printf("client(%s, token: %s) ask me to disconnect", client, token)
 				return nil
 			case pb.MsgType_Report:
 				var clientInfo pb.ClientInfo
 				if err = proto.Unmarshal(msg.Data, &clientInfo); err != nil {
-					logger.Error("failed to unmarshal client info", zap.ByteString("data", msg.Data), zap.Error(err))
+					log.Printf("failed to unmarshal client info %s: %s", msg.Data, err)
 				}
-				logger.Info("client report info", zap.Any("info", clientInfo), zap.Any("client", client))
+				log.Printf("client(%s, token: %s) report info %+v", client, token, clientInfo)
 			default:
-				logger.Error("client send bad message", zap.Any("msg", msg))
+				log.Printf("client send bad message %s", msg)
 			}
 		}
 	}
@@ -163,32 +160,32 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 		}
 
 		port := s.getRandomPort()
-		logger.Info("trying to listen port", zap.Int("port", port))
+		log.Printf("trying to listen port %d", port)
 		l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", port))
 		if err != nil {
-			logger.Error("port can't be listened", zap.Int("port", port), zap.Error(err))
+			log.Printf("port(%d) can't be listened: %s", port, err)
 			retry++
 			continue
 		}
 		l.Close()
-		logger.Info("port is ok to listen, try to check if the port is already taken by others", zap.Int("port", port))
+		log.Printf("port(%d) is ok to listen, try to check if the port is already taken by others", port)
 
 		// 检查一下是否被其他用户分配过
 		addr = fmt.Sprintf("%s:%d", s.wanIP, port)
 		taken, err := tools.CheckIfAddrAlreadyTaken(addr)
 		if err != nil {
-			logger.Error("failed to check if addr already been taken by others", zap.String("addr", addr), zap.Error(err))
+			log.Printf("failed to check if addr(%s) already been taken by others: %s", addr, err)
 			return "", err
 		}
 
 		if taken {
-			logger.Error("addr had been taken", zap.String("addr", addr))
+			log.Printf("addr(%s) had been taken", addr)
 			retry++
 			continue
 		}
 
 		if err = tools.RegisterAddr(token, addr); err != nil {
-			logger.Error("failed to register addr", zap.String("addr", addr), zap.Error(err))
+			log.Printf("failed to register addr %s: %s", addr, err)
 			return "", err
 		}
 
@@ -200,7 +197,7 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 func (s *service) createListenerByPort(port string) (net.Listener, string, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%s", port))
 	if err != nil {
-		logger.Error("failed to listen", zap.Error(err))
+		log.Printf("failed to listen at 0.0.0.0:%s: %s", port, err)
 		return nil, "", err
 	}
 	addrList := strings.Split(listener.Addr().String(), ":")
@@ -220,12 +217,12 @@ func (s *service) getRandomPort() int {
 func getToken(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		logger.Error("bad metadata", zap.Any("metadata", md))
+		log.Printf("bad metadata %s", md)
 		return ""
 	}
-	token := md.Get("natrp-token")
+	token := md.Get("natproxy-token")
 	if len(token) != 1 {
-		logger.Error("bad token in metadata", zap.Any("token", token))
+		log.Printf("bad token(%s) in metadata", token)
 		return ""
 	}
 

@@ -1,11 +1,11 @@
 package server
 
 import (
+	"log"
 	"net"
 
 	"github.com/jiajunhuang/natproxy/dial"
 	"github.com/jiajunhuang/natproxy/pb"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/peer"
 )
 
@@ -56,11 +56,11 @@ func (manager *manager) handleConnFromWAN(clientListenerAddr string) {
 			// 等待新的connection
 			clientConn, ok := <-manager.clientConnCh
 			if !ok {
-				logger.Error("failed to receive connection from client connection channel")
+				log.Printf("failed to receive connection from client connection channel")
 				return
 			}
 			wanConnAddr, clientConnAddr := wanConn.LocalAddr(), clientConn.RemoteAddr()
-			defer logger.Info("connection between WAN & client disconnected", zap.Any("wanConn", wanConnAddr), zap.Any("clientConn", clientConnAddr))
+			defer log.Printf("connection between WAN(%s) & client(%s) disconnected", wanConnAddr, clientConnAddr)
 
 			// 把两个connection串起来
 			dial.Join(wanConn, clientConn)
@@ -72,7 +72,7 @@ func (manager *manager) handleConnFromWAN(clientListenerAddr string) {
 func (manager *manager) receiveConnFromClient(client *peer.Peer, clientListener net.Listener) {
 	defer close(manager.clientConnCh)
 
-	logger.Info("start to wait new connections from client...")
+	log.Printf("start to wait new connections from client...")
 	for {
 		conn, err := clientListener.Accept()
 		if err != nil {
@@ -86,7 +86,7 @@ func (manager *manager) receiveConnFromClient(client *peer.Peer, clientListener 
 func (manager *manager) receiveConnFromWAN(client *peer.Peer, wanListener net.Listener) {
 	defer close(manager.wanConnCh)
 
-	logger.Info("start to wait new connections from WAN...")
+	log.Printf("start to wait new connections from WAN...")
 	for {
 		conn, err := wanListener.Accept()
 		if err != nil {

@@ -5,18 +5,16 @@ import (
 	"crypto/tls"
 	"flag"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
 var (
-	logger, _ = zap.NewProduction()
-
 	socketBufferSize = flag.Int("socketBufferSize", 1024*32, "连接缓冲区大小，越大越快，但是也更吃内存")
 )
 
@@ -32,13 +30,13 @@ func WithServer(ctx context.Context, addr string, useTLS bool) (pb.ServerService
 	}
 
 	if err != nil {
-		logger.Error("failed to connect to server server", zap.Error(err))
+		log.Printf("failed to connect to server server: %s", err)
 		return nil, nil, err
 	}
 
 	select {
 	case <-ctx.Done():
-		logger.Error("ctx had been done")
+		log.Printf("ctx had been done, so give up to dial with server")
 		return nil, nil, errors.ErrCanceled
 	default:
 	}

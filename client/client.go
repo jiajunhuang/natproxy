@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"flag"
+	"log"
 	"net"
 	"runtime"
 	"strings"
@@ -13,19 +14,16 @@ import (
 	"github.com/jiajunhuang/natproxy/dial"
 	"github.com/jiajunhuang/natproxy/pb"
 	"github.com/jiajunhuang/natproxy/tools"
-	"go.uber.org/zap"
 	"google.golang.org/grpc/metadata"
 )
 
 const (
-	version = "0.0.6"
+	version = "0.0.7"
 	arch    = runtime.GOARCH
 	os      = runtime.GOOS
 )
 
 var (
-	logger, _ = zap.NewProduction()
-
 	localAddr        = flag.String("local", "127.0.0.1:8080", "-local=<你本地需要转发的地址>")
 	serverAddr       = flag.String("server", "natproxy.laizuoceshi.com:8443", "-server=<你的服务器地址>")
 	token            = flag.String("token", "balalaxiaomoxian", "-token=<你的token>")
@@ -36,7 +34,7 @@ var (
 func checkAnnoncements() {
 	annoncement := tools.GetAnnouncement()
 	if annoncement != "" {
-		logger.Warn("最新公告", zap.String("公告内容", annoncement))
+		log.Printf("最新公告: %s", annoncement)
 	}
 }
 
@@ -45,10 +43,10 @@ func checkClientStatus() {
 		func() {
 			disconnect, err := tools.GetConnectionStatusByToken(*token)
 			if err != nil {
-				logger.Error("无法连接服务器", zap.Error(err))
+				log.Printf("无法连接服务器: %s", err)
 				return
 			}
-			logger.Info("检查当前服务端是否已经把本账号设置成断开连接", zap.Bool("disconnect", disconnect))
+			log.Printf("检查当前服务端是否已经把本账号设置成断开连接: %t", disconnect)
 			if disconnect == true {
 				atomic.StoreInt32(&clientDisconnect, 1)
 			} else {
@@ -63,23 +61,23 @@ func checkClientStatus() {
 func connectServer(stream pb.ServerService_MsgClient, addr string) {
 	if atomic.LoadInt32(&clientDisconnect) == 1 {
 		if err := stream.Send(&pb.MsgRequest{Type: pb.MsgType_DisConnect}); err != nil {
-			logger.Error("无法发送消息到服务器", zap.Error(err))
+			log.Printf("无法发送消息到服务器: %s", err)
 			return
 		}
-		logger.Error("服务端已经设置为拒绝连接")
+		log.Printf("服务端已经设置为拒绝连接")
 		return
 	}
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		logger.Error("无法连接服务器", zap.String("服务器地址", addr), zap.Error(err))
+		log.Printf("无法连接服务器(服务器地址%s): %s", addr, err)
 		return
 	}
 	defer conn.Close()
 
 	localConn, err := net.Dial("tcp", *localAddr)
 	if err != nil {
-		logger.Error("无法连接本地目标地址", zap.String("本地地址", *localAddr), zap.Error(err))
+		log.Printf("无法连接本地目标地址(%s): %s", *localAddr, err)
 		return
 	}
 	defer localConn.Close()
@@ -88,51 +86,51 @@ func connectServer(stream pb.ServerService_MsgClient, addr string) {
 }
 
 func waitMsgFromServer(addr string) error {
-	md := metadata.Pairs("natrp-token", *token)
+	md := metadata.Pairs("natproxy-token", *token)
 	ctx := metadata.NewOutgoingContext(context.Background(), md)
 
 	client, conn, err := dial.WithServer(ctx, *serverAddr, *useTLS)
 	if err != nil {
-		logger.Error("无法连接服务器", zap.Error(err))
+		log.Printf("无法连接服务器: %s", err)
 		return err
 	}
 	defer conn.Close()
 
-	logger.Info("准备连接到服务器", zap.String("服务器地址", *serverAddr))
+	log.Printf("准备连接到服务器(%s)...", *serverAddr)
 
 	stream, err := client.Msg(ctx)
 	if err != nil {
-		logger.Error("无法与服务器通信", zap.Error(err))
+		log.Printf("无法与服务器通信: %s", err)
 		return err
 	}
-	logger.Info("成功连接到服务器", zap.String("服务器地址", *serverAddr))
+	log.Printf("成功连接到服务器(%s)", *serverAddr)
 
 	// report client version info
 	data, err := proto.Marshal(&pb.ClientInfo{Os: os, Arch: arch, Version: version})
 	if err != nil {
-		logger.Error("无法压缩信息", zap.Error(err))
+		log.Printf("无法压缩信息: %s", err)
 		return err
 	}
 	if err := stream.Send(&pb.MsgRequest{Type: pb.MsgType_Report, Data: data}); err != nil {
-		logger.Error("无法发送消息到服务器", zap.Error(err))
+		log.Printf("无法发送消息到服务器: %s", err)
 		return err
 	}
 
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
-			logger.Error("无法从服务器接收消息", zap.Error(err))
+			log.Printf("无法从服务器接收消息: %s", err)
 			return err
 		}
 
 		switch resp.Type {
 		case pb.MsgType_Connect:
-			logger.Info("服务器要求发起新连接", zap.ByteString("目标地址", resp.Data))
+			log.Printf("服务器要求发起新连接至%s", resp.Data)
 			go connectServer(stream, string(resp.Data))
 		case pb.MsgType_WANAddr:
-			logger.Info("服务器分配的公网地址是", zap.ByteString("公网地址", resp.Data))
+			log.Printf("服务器分配的公网地址是%s", resp.Data)
 		default:
-			logger.Error("当前版本客户端不支持本消息，请升级", zap.Any("消息", resp))
+			log.Printf("当前版本客户端不支持本消息(%s)，请升级", resp.Data)
 		}
 	}
 }
@@ -145,7 +143,7 @@ func Start() {
 		err := waitMsgFromServer(*serverAddr)
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "token not valid") {
-			logger.Error("您的token不对，请检查是否正确配置，参考：https://jiajunhuang.com/natproxy")
+			log.Printf("您的token不对，请检查是否正确配置，参考：https://jiajunhuang.com/natproxy")
 			break
 		}
 		time.Sleep(time.Second * 5)
