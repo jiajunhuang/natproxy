@@ -6,17 +6,19 @@ import (
 	"net"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/jiajunhuang/natproxy/dial"
 	"github.com/jiajunhuang/natproxy/pb"
+	"github.com/jiajunhuang/natproxy/tools"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/metadata"
 )
 
 const (
-	version = "0.0.3"
+	version = "0.0.4"
 	arch    = runtime.GOARCH
 	os      = runtime.GOOS
 )
@@ -24,24 +26,54 @@ const (
 var (
 	logger, _ = zap.NewProduction()
 
-	localAddr  = flag.String("local", "127.0.0.1:80", "-local=<你本地需要转发的地址>")
-	serverAddr = flag.String("server", "127.0.0.1:10020", "-server=<你的服务器地址>")
-	token      = flag.String("token", "balalaxiaomoxian", "-token=<你的token>")
-	useTLS     = flag.Bool("tls", true, "-tls=true 默认使用TLS加密")
+	localAddr        = flag.String("local", "127.0.0.1:80", "-local=<你本地需要转发的地址>")
+	serverAddr       = flag.String("server", "127.0.0.1:10020", "-server=<你的服务器地址>")
+	token            = flag.String("token", "balalaxiaomoxian", "-token=<你的token>")
+	useTLS           = flag.Bool("tls", true, "-tls=true 默认使用TLS加密")
+	clientDisconnect int32
 )
 
-func connectServer(addr string) {
+func checkClientStatus() {
+	for {
+		func() {
+			disconnect, err := tools.GetConnectionStatusByToken(*token)
+			if err != nil {
+				logger.Error("无法连接服务器", zap.Error(err))
+				return
+			}
+			logger.Info("当前服务端已经把本账号设置成断开连接", zap.Bool("disconnect", disconnect))
+			if disconnect == true {
+				atomic.StoreInt32(&clientDisconnect, 1)
+			}
+		}()
+
+		time.Sleep(time.Second * 5)
+	}
+}
+
+func connectServer(stream pb.ServerService_MsgClient, addr string) {
+	if atomic.LoadInt32(&clientDisconnect) == 1 {
+		if err := stream.Send(&pb.MsgRequest{Type: pb.MsgType_DisConnect}); err != nil {
+			logger.Error("无法发送消息到服务器", zap.Error(err))
+			return
+		}
+		logger.Error("服务端已经设置为拒绝连接")
+		return
+	}
+
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		logger.Error("无法连接服务器", zap.String("服务器地址", addr), zap.Error(err))
 		return
 	}
+	defer conn.Close()
 
 	localConn, err := net.Dial("tcp", *localAddr)
 	if err != nil {
 		logger.Error("无法连接本地目标地址", zap.String("本地地址", *localAddr), zap.Error(err))
 		return
 	}
+	defer localConn.Close()
 
 	dial.Join(conn, localConn)
 }
@@ -87,7 +119,7 @@ func waitMsgFromServer(addr string) error {
 		switch resp.Type {
 		case pb.MsgType_Connect:
 			logger.Info("服务器要求发起新连接", zap.ByteString("目标地址", resp.Data))
-			go connectServer(string(resp.Data))
+			go connectServer(stream, string(resp.Data))
 		case pb.MsgType_WANAddr:
 			logger.Info("服务器分配的公网地址是", zap.ByteString("公网地址", resp.Data))
 		default:
@@ -98,6 +130,7 @@ func waitMsgFromServer(addr string) error {
 
 // Start client
 func Start() {
+	go checkClientStatus()
 	for {
 		err := waitMsgFromServer(*serverAddr)
 		errMsg := err.Error()

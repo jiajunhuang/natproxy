@@ -109,7 +109,7 @@ func (s *service) Msg(stream pb.ServerService_MsgServer) error {
 			}
 			switch msg.Type {
 			case pb.MsgType_DisConnect:
-				logger.Warn("client is closing, so I'm quit...")
+				logger.Warn("client ask me to disconnect")
 				return nil
 			case pb.MsgType_Report:
 				var clientInfo pb.ClientInfo

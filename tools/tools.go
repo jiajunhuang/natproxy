@@ -22,6 +22,28 @@ type respJSON struct {
 	}
 }
 
+// GetConnectionStatusByToken 根据token拿连接信息
+func GetConnectionStatusByToken(token string) (bool, error) {
+	url := *toolsAPIAddr + "/api/v1/natproxy/check_token?token=" + token
+	respJSON := &respJSON{}
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if err = json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
+		return false, err
+	}
+
+	if respJSON.Code == 200 {
+		return respJSON.Data.Disconnect, nil
+	}
+
+	return false, errors.ErrTokenNotValid
+}
+
 // GetAddrByToken 根据token拿已分配的公网地址
 func GetAddrByToken(token string) (string, error) {
 	url := *toolsAPIAddr + "/api/v1/natproxy/check_token?token=" + token
