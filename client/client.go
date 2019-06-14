@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version = "0.0.4"
+	version = "0.0.5"
 	arch    = runtime.GOARCH
 	os      = runtime.GOOS
 )
@@ -44,6 +44,8 @@ func checkClientStatus() {
 			logger.Info("检查当前服务端是否已经把本账号设置成断开连接", zap.Bool("disconnect", disconnect))
 			if disconnect == true {
 				atomic.StoreInt32(&clientDisconnect, 1)
+			} else {
+				atomic.StoreInt32(&clientDisconnect, 0)
 			}
 		}()
 
