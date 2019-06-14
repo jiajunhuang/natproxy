@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 
 	"github.com/jiajunhuang/natproxy/errors"
@@ -19,6 +20,7 @@ type respJSON struct {
 	Data struct {
 		Disconnect bool   `json:"disconnect"`
 		Addr       string `json:"addr"`
+		Token      string `json:"token"`
 	}
 }
 
@@ -139,4 +141,64 @@ func GetAnnouncement() string {
 	}
 
 	return respJSON.Msg
+}
+
+// Register 注册
+func Register(email, password string) error {
+	url := *toolsAPIAddr + "/api/v1/register"
+	respJSON := &respJSON{}
+
+	type Register struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	jsonBytes, err := json.Marshal(&Register{Email: email, Password: password})
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if err = json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
+		return err
+	}
+
+	if respJSON.Code != 200 {
+		return fmt.Errorf("无法注册，原因是: %s", respJSON.Msg)
+	}
+
+	return nil
+}
+
+// Login 登录
+func Login(email, password string) (string, error) {
+	url := *toolsAPIAddr + "/api/v1/login"
+	respJSON := &respJSON{}
+
+	type Login struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	jsonBytes, err := json.Marshal(&Login{Email: email, Password: password})
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if err = json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
+		return "", err
+	}
+
+	if respJSON.Code != 200 {
+		return "", fmt.Errorf("无法登录，原因是: %s", respJSON.Msg)
+	}
+
+	return respJSON.Data.Token, nil
 }
