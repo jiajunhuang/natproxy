@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
@@ -13,8 +14,14 @@ import (
 	"github.com/jiajunhuang/natproxy/pb"
 	"github.com/jiajunhuang/natproxy/tools"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
+)
+
+var (
+	certFilePath = flag.String("certPath", "/root/.acme.sh/*.laizuoceshi.com/*.laizuoceshi.com.cer", "cert file path")
+	keyFilePath  = flag.String("keyPath", "/root/.acme.sh/*.laizuoceshi.com/*.laizuoceshi.com.key", "key file path")
 )
 
 // Start gRPC server
@@ -26,7 +33,11 @@ func Start(addr, wanIP string, bufSize int) {
 
 	// register service
 	svc := newService(wanIP, bufSize)
-	server := grpc.NewServer()
+	creds, err := credentials.NewServerTLSFromFile(*certFilePath, *keyFilePath)
+	if err != nil {
+		log.Fatalf("failed to create credentials: %v", err)
+	}
+	server := grpc.NewServer(grpc.Creds(creds))
 
 	pb.RegisterServerServiceServer(server, svc)
 	log.Printf("server start to listen at %s, WAN ip is %s, bufSize is %d", addr, wanIP, bufSize)
