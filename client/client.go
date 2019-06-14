@@ -41,7 +41,7 @@ func checkClientStatus() {
 				logger.Error("无法连接服务器", zap.Error(err))
 				return
 			}
-			logger.Info("当前服务端已经把本账号设置成断开连接", zap.Bool("disconnect", disconnect))
+			logger.Info("检查当前服务端是否已经把本账号设置成断开连接", zap.Bool("disconnect", disconnect))
 			if disconnect == true {
 				atomic.StoreInt32(&clientDisconnect, 1)
 			}
