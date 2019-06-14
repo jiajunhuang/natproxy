@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	version = "0.0.1"
+	version = "0.0.2"
 	arch    = runtime.GOARCH
 	os      = runtime.GOOS
 )
@@ -27,6 +27,7 @@ var (
 	localAddr  = flag.String("local", "127.0.0.1:80", "-local=<你本地需要转发的地址>")
 	serverAddr = flag.String("server", "127.0.0.1:10020", "-server=<你的服务器地址>")
 	token      = flag.String("token", "balalaxiaomoxian", "-token=<你的token>")
+	useTLS     = flag.Bool("tls", true, "-tls=true 默认使用TLS加密")
 )
 
 func connectServer(addr string) {
@@ -49,7 +50,7 @@ func waitMsgFromServer(addr string) error {
 	md := metadata.Pairs("natrp-token", *token)
 	ctx := metadata.NewOutgoingContext(context.Background(), md)
 
-	client, conn, err := dial.WithServer(ctx, *serverAddr, false)
+	client, conn, err := dial.WithServer(ctx, *serverAddr, *useTLS)
 	if err != nil {
 		logger.Error("failed to connect to server server", zap.Error(err))
 		return err

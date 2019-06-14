@@ -2,6 +2,7 @@ package dial
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"sync"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/jiajunhuang/natproxy/pool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 var (
@@ -17,11 +19,12 @@ var (
 )
 
 // WithServer dial with server
-func WithServer(ctx context.Context, addr string, tls bool) (pb.ServerServiceClient, *grpc.ClientConn, error) {
+func WithServer(ctx context.Context, addr string, useTLS bool) (pb.ServerServiceClient, *grpc.ClientConn, error) {
 	var conn *grpc.ClientConn
 	var err error
-	if tls {
-		conn, err = grpc.Dial(addr)
+	if useTLS {
+		creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
+		conn, err = grpc.Dial(addr, grpc.WithTransportCredentials(creds))
 	} else {
 		conn, err = grpc.Dial(addr, grpc.WithInsecure())
 	}
