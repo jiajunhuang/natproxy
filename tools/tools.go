@@ -202,3 +202,33 @@ func Login(email, password string) (string, error) {
 
 	return respJSON.Data.Token, nil
 }
+
+// Disconnect 是否断开连接
+func Disconnect(token string, disconnect bool) error {
+	url := *toolsAPIAddr + "/api/v1/natproxy/status"
+	respJSON := &respJSON{}
+
+	type Disconnect struct {
+		Token      string `json:"token"`
+		Disconnect bool   `json:"disconnect"`
+	}
+	jsonBytes, err := json.Marshal(&Disconnect{Token: token, Disconnect: disconnect})
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if err = json.NewDecoder(resp.Body).Decode(&respJSON); err != nil {
+		return err
+	}
+
+	if respJSON.Code != 200 {
+		return fmt.Errorf("无法更新状态，原因是: %s", respJSON.Msg)
+	}
+
+	return nil
+}

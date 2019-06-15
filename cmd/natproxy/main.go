@@ -9,10 +9,12 @@ import (
 )
 
 var (
-	register = flag.Bool("register", false, "是否注册")
-	login    = flag.Bool("login", false, "是否登录")
-	email    = flag.String("email", "", "注册邮箱")
-	password = flag.String("password", "", "注册密码")
+	register   = flag.Bool("register", false, "是否注册")
+	login      = flag.Bool("login", false, "是否登录")
+	email      = flag.String("email", "", "注册邮箱")
+	password   = flag.String("password", "", "注册密码")
+	disconnect = flag.Bool("disconnect", false, "是否设置为断开连接")
+	connect    = flag.Bool("connect", false, "是否设置为开启连接")
 )
 
 func main() {
@@ -41,5 +43,5 @@ func main() {
 		return
 	}
 
-	client.Start()
+	client.Start(*connect, *disconnect)
 }

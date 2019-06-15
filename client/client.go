@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version = "0.0.8"
+	version = "0.0.9"
 	arch    = runtime.GOARCH
 	os      = runtime.GOOS
 )
@@ -26,7 +26,7 @@ const (
 var (
 	localAddr        = flag.String("local", "127.0.0.1:8080", "-local=<你本地需要转发的地址>")
 	serverAddr       = flag.String("server", "natproxy.laizuoceshi.com:8443", "-server=<你的服务器地址>")
-	token            = flag.String("token", "balalaxiaomoxian", "-token=<你的token>")
+	token            = flag.String("token", "", "-token=<你的token>")
 	useTLS           = flag.Bool("tls", true, "-tls=true 默认使用TLS加密")
 	clientDisconnect int32
 )
@@ -136,9 +136,26 @@ func waitMsgFromServer(addr string) error {
 }
 
 // Start client
-func Start() {
+func Start(connect, disconnect bool) {
+	if *token == "" {
+		log.Printf("token不能为空")
+		return
+	}
+
+	if disconnect {
+		err := tools.Disconnect(*token, disconnect)
+		log.Printf("通知服务器将本客户端设置为断开连接结果: %s", err)
+		return
+	}
+	if connect {
+		err := tools.Disconnect(*token, connect)
+		log.Printf("通知服务器将本客户端设置为正常连接结果: %s", err)
+		return
+	}
+
 	go checkClientStatus()
 	go checkAnnoncements()
+
 	for {
 		err := waitMsgFromServer(*serverAddr)
 		errMsg := err.Error()
