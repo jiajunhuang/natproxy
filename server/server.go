@@ -13,6 +13,7 @@ import (
 	"github.com/jiajunhuang/natproxy/errors"
 	"github.com/jiajunhuang/natproxy/pb"
 	"github.com/jiajunhuang/natproxy/tools"
+	reuse "github.com/libp2p/go-reuseport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -26,7 +27,7 @@ var (
 
 // Start gRPC server
 func Start(addr, wanIP string, bufSize int) {
-	listener, err := net.Listen("tcp", addr)
+	listener, err := reuse.Listen("tcp", addr)
 	if err != nil {
 		log.Printf("failed to listen at addr %s", addr)
 	}
