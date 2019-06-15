@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version = "0.0.9"
+	version = "0.1.0"
 	arch    = runtime.GOARCH
 	os      = runtime.GOOS
 )
@@ -86,6 +86,8 @@ func connectServer(stream pb.ServerService_MsgClient, addr string) {
 }
 
 func waitMsgFromServer(addr string) error {
+	log.Printf("准备连接到服务器(%s)...", *serverAddr)
+
 	md := metadata.Pairs("natproxy-token", *token)
 	ctx := metadata.NewOutgoingContext(context.Background(), md)
 
@@ -95,8 +97,6 @@ func waitMsgFromServer(addr string) error {
 		return err
 	}
 	defer conn.Close()
-
-	log.Printf("准备连接到服务器(%s)...", *serverAddr)
 
 	stream, err := client.Msg(ctx)
 	if err != nil {
@@ -143,12 +143,12 @@ func Start(connect, disconnect bool) {
 	}
 
 	if disconnect {
-		err := tools.Disconnect(*token, disconnect)
+		err := tools.Disconnect(*token, true)
 		log.Printf("通知服务器将本客户端设置为断开连接结果: %s", err)
 		return
 	}
 	if connect {
-		err := tools.Disconnect(*token, connect)
+		err := tools.Disconnect(*token, false)
 		log.Printf("通知服务器将本客户端设置为正常连接结果: %s", err)
 		return
 	}

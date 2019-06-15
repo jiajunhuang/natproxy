@@ -159,8 +159,15 @@ func (s *service) getListenAddrByToken(token string) (string, error) {
 		addrList := strings.Split(addr, ":")
 		// 如果上次分配的地址是本机，那么直接返回，否则，就应该重新分配
 		if addrList[0] == s.wanIP {
+			// 尝试监听一下，如果没有问题，就返回，如果有问题，就重新分配一个
 			listenerAddr := fmt.Sprintf("0.0.0.0:%s", addrList[len(addrList)-1])
-			return listenerAddr, nil
+			l, err := net.Listen("tcp", listenerAddr)
+			if err == nil {
+				l.Close()
+				return listenerAddr, nil
+			}
+
+			log.Printf("failed to listen at %s: %s, try to find another one", listenerAddr, err)
 		}
 	}
 

@@ -43,5 +43,6 @@ func main() {
 		return
 	}
 
+	log.Printf("启动客户端...")
 	client.Start(*connect, *disconnect)
 }
